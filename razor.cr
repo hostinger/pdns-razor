@@ -89,7 +89,8 @@ class Razor
   def mainLoop
     loop do
       qname, qtype, src, edns = parse_query STDIN.read_line
-      name = @zone || qname.downcase
+      qname = qname.downcase
+      name = @zone || qname
       edns = edns.split("/")[0]
       hash_source = @hash_method == "edns" ? edns : src
 
