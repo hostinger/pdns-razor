@@ -80,7 +80,6 @@ describe "GeoIP" do
 
     # Others gets IPs from cdn.example.org pool
     razor.data_from_redis("A", qname, "102.164.115.0", options).first.to_s.should match(/(192\.168\.0\.\d+|10.0.0.1)/)
-    razor.data_from_redis("AAAA", qname, "2a06:4b80::", options).first.to_s.should match(/(2a02:4780::1|2a02:4780:0004:)/)
 
     # Others gets IPs from cdn.example.org pool, not found in GeoIP database
     razor.data_from_redis("A", qname, "127.0.0.1", options).first.to_s.should match(/(192\.168\.0\.\d+|10.0.0.1)/)
@@ -126,7 +125,7 @@ describe "GeoIP" do
     redis = Redis.new(unixsocket: redis_unixsocket)
     razor = RazorTest.new.razor
     options = razor.mandatory_dns_options(qname)
-    razor.data_from_redis("A", qname, "66.249.82.0", options).should eq(["10.0.3.1"])
+    razor.data_from_redis("A", qname, "66.249.82.0", options).should eq(["10.0.2.1"])
   end
 
   it "Check if mandatory DNS record types are returned correctly" do

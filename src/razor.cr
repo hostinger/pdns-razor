@@ -170,27 +170,28 @@ class Razor
   end
 
   private def geoip_data(ip)
-    return nil, nil unless ip
+    return nil, nil, nil unless ip
 
     # Make sure we can handle errors when querying non-existing IPs in DB.
     # E.g.: 127.0.0.1.
     begin
-      rec = @geoip.country(ip)
+      rec = @geoip.city(ip)
       continent = rec.continent.code
       country = rec.country.iso_code
-      if !continent && !country
+      state = rec.subdivisions.size > 0 ? rec.subdivisions[0].iso_code : nil
+      if !continent && !country && !state
         if @debug
-          @log.warn("No continent/country found for #{ip}")
+          @log.warn("No continent/country/state found for #{ip}")
         end
-        return nil, nil
+        return nil, nil, nil
       end
-      return continent, country
+      return continent, country, state
     rescue
       @log.warn("GeoIP information not found for #{ip}")
-      return nil, nil
+      return nil, nil, nil
     end
 
-    return continent, country
+    return continent, country, state
   end
 
   private def to_sorted_array_of_string(array)
@@ -334,13 +335,14 @@ class Razor
 
   private def geoip_content(qname, qtype, src)
     # Process GeoIP here, and return the pool by the
-    # country/continent.
+    # country/continent/state.
     # In Redis, the keys MUST keep the following encoding:
     #   geoip:eu
     #   geoip:eu:lt
-    #   geoip:eu:uk
+    #   geoip:eu:lt:vl
     #   geoip:na
     #   geoip:na:us
+    #   geoip:na:us:ca
     #   ...
     #
     # Redis KEY returns the VALUE of something like:
@@ -358,6 +360,7 @@ class Razor
     route : (Redis::RedisValue | String | Nil) = nil
     continent : (String | Nil) = nil
     country : (String | Nil) = nil
+    state : (String | Nil) = nil
 
     # If we want to stick specific qname to an arbitrary PoP
     # instead of relying on GeoIP data, just create a key in Redis
@@ -369,13 +372,20 @@ class Razor
         name = r_name
       else
         name = @zone || qname
-        continent, country = geoip_data(src)
+        continent, country, state = geoip_data(src)
       end
 
-      # Fetch continent:country and continent in batched mode (MGET),
+      # Fetch state:country:continent in batched mode (MGET),
       # to save one additional request to Redis.
-      if continent && country
-        route_country, route_continent = @redis.mget("geoip:#{continent.downcase}:#{country.downcase}",
+      if continent && country && state
+        route_state, route_country, route_continent = @redis.mget(
+          "geoip:#{continent.downcase}:#{country.downcase}:#{state.downcase}",
+          "geoip:#{continent.downcase}:#{country.downcase}",
+          "geoip:#{continent.downcase}")
+        route = route_state || route_country || route_continent
+      elsif continent && country
+        route_country, route_continent = @redis.mget(
+          "geoip:#{continent.downcase}:#{country.downcase}",
           "geoip:#{continent.downcase}")
         route = route_country || route_continent
       elsif continent
@@ -383,14 +393,14 @@ class Razor
       end
 
       if route
-        return random_ip_get(route, qtype), continent, country
+        return random_ip_get(route, qtype), continent, country, state
       end
     rescue Redis::Error
       @log.error("Something went wrong, key: '#{qname}:#{qtype}', src: #{src}")
     end
 
     # If GeoIP is skipped, return more specific PoP or the default @zone
-    return random_ip_get(name, qtype), nil, nil
+    return random_ip_get(name, qtype), nil, nil, nil
   end
 
   def data_from_redis(qtype, name, src, options)
@@ -400,8 +410,10 @@ class Razor
     when "NS"
       options[:ns]
     when "TXT"
-      ip, continent, country = geoip_content(name, src.includes?(":") ? "AAAA" : "A", src)
-      if continent && country
+      ip, continent, country, state = geoip_content(name, src.includes?(":") ? "AAAA" : "A", src)
+      if continent && country && state
+        ["#{NAME}/#{src} (#{continent}:#{country}:#{state})/#{ip}"]
+      elsif continent && country
         ["#{NAME}/#{src} (#{continent}:#{country})/#{ip}"]
       else
         ["#{NAME}/#{src}/#{ip}"]
@@ -415,7 +427,7 @@ class Razor
       when "group_consistent_hash"
         [gch_content(qtype, to_sorted_array_of_string(dns_groups(name)), src)]
       when "geoip"
-        ip, _, _ = geoip_content(name, qtype, src)
+        ip, _, _, _ = geoip_content(name, qtype, src)
         [ip]
       else
         [] of String
