@@ -3,3 +3,4 @@ lib/
 *.swp
 razor
 docker/pkgs/razor-*
+.DS_Store
