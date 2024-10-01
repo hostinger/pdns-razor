@@ -98,7 +98,7 @@ class Razor
   end
 
   def mainLoop
-    Schedule.every(5.seconds) do
+    Schedule.every(1.hour) do
       geoip_db_check
     end
 
@@ -143,6 +143,7 @@ class Razor
     digest = Digest::MD5.digest do |ctx|
       ctx.update File.read(@geoip_db_path)
     end
+    GC.collect
     digest.to_slice.hexstring
   end
 
