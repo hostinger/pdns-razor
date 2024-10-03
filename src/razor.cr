@@ -25,11 +25,29 @@ class Razor
     @redis_unixsocket = "/tmp/redis.sock"
     @debug = false
     @log = Logger.new(STDERR)
+    @loglevel = 4
     @hash_method = "edns"
     @zone = nil
     @geoip_db_path = "/usr/share/GeoIP/GeoIP2-Country.mmdb"
 
     parse_arguments
+
+    case @loglevel
+    when 0
+      @log.level = Logger::DEBUG
+    when 1
+      @log.level = Logger::INFO
+    when 2
+      @log.level = Logger::WARN
+    when 3
+      @log.level = Logger::ERROR
+    when 4
+      @log.level = Logger::FATAL
+    when 5
+      @log.level = Logger::UNKNOWN
+    else
+      @log.level = Logger::FATAL
+    end
 
     @geoip = GeoIP2.open(@geoip_db_path)
     @geoip_db_checksum = geoip_db_checksum
@@ -56,8 +74,8 @@ class Razor
         exit
       end
       parser.invalid_option do |flag|
-        @log.error("#{flag} is not a valid option")
-        @log.error(parser)
+        @log.fatal("#{flag} is not a valid option")
+        @log.fatal(parser)
         exit(1)
       end
     end
@@ -66,7 +84,7 @@ class Razor
       config = JSON.parse(file)
 
       unless config["contexts"]
-        @log.error("can't parse JSON #{@config} configuration file")
+        @log.fatal("can't parse JSON #{@config} configuration file")
         exit(1)
       end
 
@@ -75,6 +93,7 @@ class Razor
 
         @banner = context["banner"].as_s if context["banner"]?
         @debug = context["debug"].as_bool if context["debug"]?
+        @loglevel = context["loglevel"].as_i if context["loglevel"]?
         @hash_method = context["hash_method"].as_s if context["hash_method"]?
         @redis_host = context["redis_host"].as_s if context["redis_host"]?
         @redis_port = context["redis_port"].as_i if context["redis_port"]?
@@ -84,7 +103,7 @@ class Razor
           @geoip_db_path = context["geoip_db_path"].as_s
         end
       rescue
-        @log.error("no such context found #{@context} or missing configuration in JSON")
+        @log.fatal("no such context found #{@context} or missing configuration in JSON")
         exit(1)
       end
 
@@ -99,6 +118,7 @@ class Razor
 
   def mainLoop
     Schedule.every(1.hour) do
+      @log.debug("Hourly schedule starts")
       geoip_db_check
     end
 
@@ -152,6 +172,7 @@ class Razor
     # reopen to handle this internally, without PowerDNS restart.
     new_geoip_db_checksum = geoip_db_checksum
     if @geoip_db_checksum != new_geoip_db_checksum
+      @log.debug("Reloading GeoIP database")
       @geoip = GeoIP2.open(@geoip_db_path)
       @geoip_db_checksum = new_geoip_db_checksum
     end
@@ -181,9 +202,7 @@ class Razor
       country = rec.country.iso_code
       state = rec.subdivisions.size > 0 ? rec.subdivisions[0].iso_code : nil
       if !continent && !country && !state
-        if @debug
-          @log.warn("No continent/country/state found for #{ip}")
-        end
+        @log.warn("No continent/country/state found for #{ip}")
         return nil, nil, nil
       end
       return continent, country, state
