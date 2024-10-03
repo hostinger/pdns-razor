@@ -5,6 +5,7 @@
       "zone": "example.org",
       "hash_method": "edns",
       "debug": true,
+      "loglevel": 0,
       "redis_host": "127.0.0.1",
       "redis_port": 6379,
       "redis_unixsocket": "/tmp/redis.sock",
