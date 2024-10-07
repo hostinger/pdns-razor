@@ -30,7 +30,7 @@ class Razor
     @zone = nil
     @geoip_db_path = "/usr/share/GeoIP/GeoIP2-Country.mmdb"
 
-    parse_arguments
+    running_configuration = parse_arguments
 
     case @loglevel
     when 0
@@ -49,8 +49,10 @@ class Razor
       @log.level = Logger::FATAL
     end
 
+    @log.info("Loading with configuration: #{running_configuration}")
+
     @geoip = GeoIP2.open(@geoip_db_path)
-    @geoip_db_checksum = geoip_db_checksum
+    @geoip_db_checksum = file_checksum(@geoip_db_path)
     @redis = Redis.new(host: @redis_host,
       port: @redis_port,
       unixsocket: @redis_unixsocket)
@@ -107,7 +109,7 @@ class Razor
         exit(1)
       end
 
-      @log.info("Loading with configuration: #{context}")
+      context
     end
   end
 
@@ -118,8 +120,9 @@ class Razor
 
   def mainLoop
     Schedule.every(1.hour) do
-      @log.debug("Hourly schedule starts")
+      @log.debug("Check for changes in the GeoIP database")
       geoip_db_check
+      GC.collect
     end
 
     loop do
@@ -159,20 +162,22 @@ class Razor
     end
   end
 
-  private def geoip_db_checksum
-    digest = Digest::MD5.digest do |ctx|
-      ctx.update File.read(@geoip_db_path)
+  private def file_checksum(file_path : String)
+    digest = Digest::MD5.new
+    File.open(file_path, "rb") do |file|
+      file.each_line do |line|
+        digest.update(line)
+      end
     end
-    GC.collect
-    digest.to_slice.hexstring
+    digest.hexfinal
   end
 
   private def geoip_db_check
     # If the checksum changed of the .mmdb file, close, and
     # reopen to handle this internally, without PowerDNS restart.
-    new_geoip_db_checksum = geoip_db_checksum
+    new_geoip_db_checksum = file_checksum(@geoip_db_path)
     if @geoip_db_checksum != new_geoip_db_checksum
-      @log.debug("Reloading GeoIP database")
+      @log.debug("Load the modified GeoIP database")
       @geoip = GeoIP2.open(@geoip_db_path)
       @geoip_db_checksum = new_geoip_db_checksum
     end
